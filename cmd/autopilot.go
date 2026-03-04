@@ -14,14 +14,25 @@ import (
 
 var autopilotCmd = &cobra.Command{
 	Use:   "autopilot",
-	Short: "Fully automated engagement orchestration (Phase 1-5)",
-	Long: `Executes a full chained attack sequence:
-  1. Infrastructure Scan & OS Detection
-  2. AD Enumeration (Users, Groups, ADCS)
-  3. Kerberoasting & AS-REP Roasting
-  4. BloodHound Telemetry Collection
-  5. Critical File Harvesting
-  6. Professional HTML Reporting`,
+	Short: "Automated end-to-end engagement orchestration",
+	Long: `Autopilot executes a fully automated, phased engagement against the target domain.
+It chains reconnaissance, enumeration, exploitation, and reporting without operator intervention.
+
+Phases:
+  Phase 1 — Infrastructure Recon    : Port scan + OS detection on the DC
+  Phase 2 — AD Enumeration          : Users, groups, and ADCS certificate authorities
+  Phase 4 — BloodHound Collection   : SharpHound-compatible JSON export for attack path analysis
+  Phase 5 — Loot Harvesting         : SMB share spider for sensitive files (.kdbx, .conf, .txt)
+  Phase 6 — HTML Report Generation  : Self-contained report saved to the workspace directory
+
+Generated Artifacts (workspace/):
+  - users.json                      : Full user object dump
+  - BloodHound JSON files           : Ready for import into BloodHound CE
+  - engagement_report.html          : Executive-ready HTML engagement summary
+
+Example:
+  adreaper autopilot -d corp.local --dc-ip 10.10.10.1 -u admin -p 'P@ssword'
+  adreaper autopilot -d corp.local --dc-ip 10.10.10.1 -u admin -p 'P@ssword' -o autopilot_log`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := opts.Validate(); err != nil {
 			return err

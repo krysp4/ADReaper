@@ -14,7 +14,23 @@ import (
 
 var enumCmd = &cobra.Command{
 	Use:   "enum",
-	Short: "Enumerate Active Directory objects",
+	Short: "Enumerate Active Directory objects and configurations",
+	Long: `The 'enum' module provides LDAP-based enumeration of everything in the target domain.
+Run 'adreaper enum <subcommand> --help' for detailed usage and attack-relevant context.
+
+Subcommands:
+  users        Enumerate all user accounts (SPN, AS-REP, delegation, password policy)
+  computers    Enumerate computer accounts (DCs, LAPS, unconstrained delegation)
+  groups       Enumerate groups and memberships (AdminSDHolder-protected groups)
+  shares       List SMB shares and access level (read/write)
+  acls         Detect dangerous ACLs (GenericAll, WriteDACL, DCSync rights)
+  trusts       Map domain trust relationships and SID-filtering status
+  domain       Domain metadata: functional level, password policy, MAQ
+  adcs         ADCS Certificate Authorities + ESC1-ESC4 template detection
+  local-admins Identify which domain users have local admin via GPO (no host scan)
+  tree         Visual tree of SMB share filesystem
+  all          High-level aggregate counts: users / computers / groups / OUs / GPOs
+  dump         Full extraction of all users, computers, and groups in separate tables`,
 }
 
 func init() {
@@ -43,15 +59,29 @@ var (
 
 var enumUsersCmd = &cobra.Command{
 	Use:   "users",
-	Short: "Enumerate user accounts",
-	Long: `Enumerate AD user accounts with detailed attribute analysis.
-Flags allow filtering to specific attack-relevant subsets.
+	Short: "Enumerate domain user accounts with attack-relevant flags",
+	Long: `Queries LDAP for all user objects and annotates attack-relevant attributes.
+
+User Flags in output:
+  [DISABLED]         Account is disabled
+  [ADMIN]            adminCount=1 (protected by AdminSDHolder)
+  [ASREP]            DONT_REQ_PREAUTH — can be AS-REP roasted without credentials
+  [SPN]              Has a ServicePrincipalName — Kerberoasting target
+  [UNCONSTRAINED-DELEG] Dangerous: can impersonate ANY user to ANY service
+  [CONSTRAINED-DELEG]   Delegated to specific SPNs only
+  [NO-PWD-EXP]       PasswordNeverExpires — stale credentials risk
+
+Filter Flags:
+  --spn-only         Pull only Kerberoastable accounts → feed to 'attack kerberoast'
+  --asrep-only       Pull AS-REP roastable targets   → feed to 'attack asreproast'
+  --deleg            Show only accounts with delegation configured
+  --admin-only       Show only AdminCount=1 accounts
 
 Examples:
-  adreaper enum users -d corp.local --dc-ip 10.10.10.1 -u admin -p P@ss
-  adreaper enum users --spn-only     # Kerberoastable targets
-  adreaper enum users --asrep-only   # AS-REP roastable targets
-  adreaper enum users --deleg        # Delegation misconfigurations`,
+  adreaper enum users -d corp.local --dc-ip 10.10.10.1 -u user -p pass
+  adreaper enum users --spn-only -d corp.local --dc-ip 10.10.10.1 -u user -p pass
+  adreaper enum users --asrep-only -d corp.local --dc-ip 10.10.10.1 -u user -p pass
+  adreaper enum users --deleg -d corp.local --dc-ip 10.10.10.1 -u user -p pass`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := opts.Validate(); err != nil {
 			return err
@@ -158,13 +188,24 @@ func buildUserFlags(u recon.User) string {
 
 var enumComputersCmd = &cobra.Command{
 	Use:   "computers",
-	Short: "Enumerate computer accounts",
+	Short: "Enumerate computer accounts (DCs, LAPS, delegation)",
+	Long: `Queries LDAP for all computer objects and annotates attack-relevant attributes.
+
+Computer Flags in output:
+  [DC]                   Domain Controller
+  [UNCONSTRAINED-DELEG]  High-risk: machine can impersonate any user to any service
+  [LAPS-READABLE]        LAPS local admin password is readable by your current user
+
+Tip: Workstations with unconstrained delegation are prime coercion targets
+(PetitPotam, PrinterBug) to capture Domain Controller machine account TGTs.
+
+Example:
+  adreaper enum computers -d corp.local --dc-ip 10.10.10.1 -u user -p pass`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := opts.Validate(); err != nil {
 			return err
 		}
 		ctx := context.Background()
-		output.Section("Computer Enumeration")
 
 		ldapCl, err := recon.NewLDAPClient(opts)
 		if err != nil {
@@ -208,7 +249,22 @@ var (
 
 var enumGroupsCmd = &cobra.Command{
 	Use:   "groups",
-	Short: "Enumerate groups (and their members)",
+	Short: "Enumerate security groups and memberships",
+	Long: `Lists all AD security groups with member counts and AdminSDHolder protection status.
+
+Search is substring-based on both sAMAccountName and DN:
+  --name 'Admin'   matches 'Domain Admins', 'Server Admins', etc.
+
+Localization Note:
+  If the domain is in a non-English locale (e.g., Spanish), group names will NOT
+  match English terms. Use localized keywords:
+    English: 'Admins', 'Users', 'Computers'
+    Spanish: 'Admins', 'Usuarios', 'Equipos', 'Dominio'
+
+Examples:
+  adreaper enum groups -d corp.local --dc-ip 10.10.10.1 -u user -p pass
+  adreaper enum groups --name 'Domain Admins' -d corp.local --dc-ip 10.10.10.1 -u user -p pass
+  adreaper enum groups --name Admins -d corp.local --dc-ip 10.10.10.1 -u user -p pass`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := opts.Validate(); err != nil {
 			return err
@@ -262,7 +318,20 @@ var enumGroupsCmd = &cobra.Command{
 
 var enumSharesCmd = &cobra.Command{
 	Use:   "shares",
-	Short: "Enumerate SMB shares on the DC",
+	Short: "Enumerate accessible SMB shares on the DC",
+	Long: `Lists all SMB shares on the target Domain Controller and tests read/write access.
+
+  SYSVOL — ALWAYS readable. Contains GPO scripts, GPP passwords, logon scripts.
+  NETLOGON — Contains logon scripts. Check for writable scripts.
+  C$  / ADMIN$ — Administrative shares. Readable = local admin / Domain Admin.
+  Custom shares — Check for sensitive data (backup files, configs, .kdbx, etc.)
+
+Next Steps:
+  Use 'enum tree --share SYSVOL' to inspect SYSVOL contents.
+  Use 'attack gpp' to automatically decrypt GPP passwords found in SYSVOL.
+
+Example:
+  adreaper enum shares -d corp.local --dc-ip 10.10.10.1 -u user -p pass`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := opts.Validate(); err != nil {
 			return err
@@ -293,9 +362,24 @@ var enumSharesCmd = &cobra.Command{
 
 var enumACLsCmd = &cobra.Command{
 	Use:   "acls",
-	Short: "Enumerate dangerous ACLs on privileged AD objects",
-	Long: `Checks ACLs on high-value targets: Domain root, Domain Admins, AdminSDHolder.
-Flags dangerous permissions: GenericAll, WriteDACL, WriteOwner, DCSync rights.`,
+	Short: "Detect dangerous ACEs on high-value AD objects",
+	Long: `Audits Access Control Lists on the highest-value AD objects:
+  - Domain object root
+  - Domain Admins group
+  - AdminSDHolder container
+
+Flagged Permissions (exploitation paths):
+  GenericAll       Full control over the object → password reset, SPN add, group join
+  WriteDACL        Can modify the object's ACL → grant yourself GenericAll
+  WriteOwner       Can take ownership → then WriteDACL → GenericAll
+  DS-Replication   DCSync rights → extract all NTLM hashes
+
+Next Steps:
+  Use 'attack acl-abuse' to exploit ForceChangePassword or GenericWrite findings.
+  Feed findings to BloodHound CE for automated attack path visualization.
+
+Example:
+  adreaper enum acls -d corp.local --dc-ip 10.10.10.1 -u user -p pass`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := opts.Validate(); err != nil {
 			return err
@@ -332,7 +416,20 @@ Flags dangerous permissions: GenericAll, WriteDACL, WriteOwner, DCSync rights.`,
 
 var enumTrustsCmd = &cobra.Command{
 	Use:   "trusts",
-	Short: "Enumerate domain trust relationships",
+	Short: "Map cross-domain trust relationships",
+	Long: `Enumerates all Active Directory trust relationships for the target domain.
+
+Columns:
+  Partner    Partner domain FQDN
+  Direction  Inbound / Outbound / Bidirectional
+  Type       ParentChild / External / Forest / MIT
+  SID-Filtered  YES = SID history cannot be abused across this trust
+
+Forest trusts with SID Filtering disabled (NO) allow SID history injection
+for privilege escalation from a child domain to the forest root.
+
+Example:
+  adreaper enum trusts -d corp.local --dc-ip 10.10.10.1 -u user -p pass`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := opts.Validate(); err != nil {
 			return err
@@ -368,7 +465,22 @@ var enumTrustsCmd = &cobra.Command{
 
 var enumDomainCmd = &cobra.Command{
 	Use:   "domain",
-	Short: "Enumerate domain policy and password policy",
+	Short: "Enumerate domain metadata and password policy",
+	Long: `Queries the domain root object for key security configuration values.
+
+Reported Attributes:
+  Functional Level        : Determines which Kerberos features are available
+  Machine Account Quota   : > 0 means any user can add machines (NoPac prerequisite!)
+  Min Password Length     : < 8 = likely weak passwords in use
+  Lockout Threshold       : 0 = no lockout, safe to spray aggressively
+  Password Complexity     : Enabled/Disabled
+  Max Password Age        : 0 = passwords never expire domain-wide
+
+Tip: A lockout threshold of 0 combined with a short password means aggressive
+spraying via 'attack spray' is safe without risk of account lockout.
+
+Example:
+  adreaper enum domain -d corp.local --dc-ip 10.10.10.1 -u user -p pass`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := opts.Validate(); err != nil {
 			return err
@@ -427,8 +539,24 @@ func flToName(level int) string {
 
 var enumADCSCmd = &cobra.Command{
 	Use:   "adcs",
-	Short: "Enumerate Active Directory Certificate Services (ADCS)",
-	Long:  "Enumerates Certificate Authorities and certificate templates, flagging ESC1-ESC8 misconfigurations.",
+	Short: "Enumerate ADCS Certificate Authorities and vulnerable templates",
+	Long: `Enumerates Active Directory Certificate Services (ADCS) infrastructure.
+
+Detects:
+  ESC1  Enrollee supplies SAN + Client Auth + No manager approval → impersonate any user
+  ESC2  AnyPurpose EKU — effectively ESC1 with broader scope
+  ESC3  Enrollment Agent template — request certs on behalf of other users
+  ESC4  Write permissions on a template — can modify it to enable ESC1
+
+Requires authentication. Run 'enum shares' first to confirm ADCS is present
+(look for 'CertEnroll' share on the DC or a dedicated CA server).
+
+Next Steps:
+  Use Certipy for full ESC exploitation: certipy req -u user@corp.local -p pass
+  Evidence saved to: workspace/<domain>/adcs_templates.json
+
+Example:
+  adreaper enum adcs -d corp.local --dc-ip 10.10.10.1 -u user -p pass`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := opts.Validate(); err != nil {
 			return err
@@ -502,13 +630,24 @@ var (
 
 var enumTreeCmd = &cobra.Command{
 	Use:   "tree",
-	Short: "Display a visual tree of an SMB share",
-	Long: `Recursively lists files and directories in an SMB share in a tree format.
-Allows visual exploration of remote file systems.
+	Short: "Visual filesystem tree for SMB shares",
+	Long: `Recursively lists files and directories within an SMB share using a tree layout.
+Useful for manual filesystem exploration without transferring files.
 
-Example:
-  adreaper enum tree -d lab.local --dc-ip 10.10.10.1 -u admin -p pass --share SYSVOL
-  adreaper enum tree --share 'C$' --depth 2`,
+Share Modes:
+  (no --share flag)       Show share names only (quick overview)
+  --share SYSVOL          Walk the SYSVOL share (GPO scripts, GPP files)
+  --share 'C$'            Walk the C$ administrative share (requires admin)
+  --share all             Walk ALL accessible shares (use with caution on large environments)
+
+Depth Control:
+  --depth 3 (default)     Recursive depth limit
+  --depth 1               List top-level directories only
+
+Examples:
+  adreaper enum tree -d corp.local --dc-ip 10.10.10.1 -u user -p pass
+  adreaper enum tree --share SYSVOL --depth 5 -d corp.local --dc-ip 10.10.10.1 -u user -p pass
+  adreaper enum tree --share all --depth 2 -d corp.local --dc-ip 10.10.10.1 -u user -p pass`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := opts.Validate(); err != nil {
 			return err
@@ -607,9 +746,23 @@ func init() {
 
 var enumLocalAdminsCmd = &cobra.Command{
 	Use:   "local-admins",
-	Short: "Local Admin Hunt — Identify where users have local administrative rights via GPO",
-	Long: `Analyzes Group Policy Objects (GPO) to find 'Restricted Groups' and 'Group Policy Preferences' 
-that modify local administrators. Cross-references SIDs to find domain users with local admin access.`,
+	Short: "Identify domain users with local admin rights via GPO (no host scanning)",
+	Long: `Analyzes Group Policy Objects (GPO) stored in SYSVOL to identify which domain
+users or groups are granted local administrator rights on domain-joined workstations.
+
+Technique:
+  Parses 'Restricted Groups' (GptTmpl.inf) and 'Group Policy Preferences' (Groups.xml)
+  from SYSVOL. Cross-references SID values to resolve human-readable identities.
+
+Advantages over network-based admin hunting:
+  - No traffic to workstations (fully stealth, DC-only)
+  - Works even when hosts are offline or firewalled
+  - Requires only LDAP + SMB access to the Domain Controller
+
+Requires: valid domain credentials with SYSVOL read access
+
+Example:
+  adreaper enum local-admins -d corp.local --dc-ip 10.10.10.1 -u user -p pass`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := opts.Validate(); err != nil {
 			return err
@@ -657,9 +810,24 @@ that modify local administrators. Cross-references SIDs to find domain users wit
 
 var enumAllCmd = &cobra.Command{
 	Use:   "all",
-	Short: "Comprehensive Domain Audit — Gather high-level stats from all categories",
-	Long: `Performs a shallow but wide-reaching discovery of the entire domain environment.
-Summarizes counts for users, computers, groups, GPOs, and trusts to map the operational surface.`,
+	Short: "High-level domain radiography — aggregate counts of all object types",
+	Long: `Performs a single breadth-first sweep of the domain and reports aggregate counts.
+Faster than running each 'enum' subcommand individually. Ideal as the first command
+after authentication to understand the domain's scale.
+
+Reported Categories:
+  Users      All user accounts (including service accounts and disabled)
+  Computers  All computer accounts (workstations, servers, DCs)
+  Groups     All security and distribution groups
+  Trusts     Cross-domain / forest trust relationships
+  OUs        Organizational Unit containers
+  GPOs       Group Policy Objects
+
+Tip: Combine with '-o output.txt' to capture the overview for your report.
+
+Examples:
+  adreaper enum all -d corp.local --dc-ip 10.10.10.1 -u user -p pass
+  adreaper enum all -d corp.local --dc-ip 10.10.10.1 -u user -p pass -o overview.txt`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := opts.Validate(); err != nil {
 			return err
@@ -701,9 +869,23 @@ Summarizes counts for users, computers, groups, GPOs, and trusts to map the oper
 
 var enumDumpCmd = &cobra.Command{
 	Use:   "dump",
-	Short: "Total Visibility Dump — Extract ALL users, computers, and groups",
-	Long: `Performs a massive data extraction of all primary AD objects.
-Displays Usernames, Computer Names, and Group Names in a single combined list for exhaustive reconnaissance.`,
+	Short: "Full AD object extraction — all users, computers, and groups in categorized tables",
+	Long: `Performs a complete data extraction of all primary Active Directory objects.
+Results are presented in three separate, categorized tables for maximum readability.
+
+Extracted Data:
+  Domain Users      : SAMAccountName, UPN, Description
+  Domain Computers  : SAMAccountName, DNS Hostname, Operating System
+  Domain Groups     : Group Name, Member count, Description
+
+This command is the 'nuclear option' — run it when you want total visibility
+before deciding which specific 'enum' subcommand to run for deeper analysis.
+
+Tip: Combine with '-o dump.txt' to save the full object list for offline analysis.
+
+Examples:
+  adreaper enum dump -d corp.local --dc-ip 10.10.10.1 -u user -p pass
+  adreaper enum dump -d corp.local --dc-ip 10.10.10.1 -u user -p pass -o full_dump.txt`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := opts.Validate(); err != nil {
 			return err

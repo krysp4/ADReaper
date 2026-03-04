@@ -19,7 +19,12 @@ import (
 
 var infraCmd = &cobra.Command{
 	Use:   "infra",
-	Short: "Infrastructure reconnaissance and scanning",
+	Short: "Infrastructure reconnaissance — port scanning and DNS enumeration",
+	Long: `The 'infra' module provides network-level reconnaissance before or alongside LDAP enumeration.
+
+Subcommands:
+  scan    TCP port scan with service detection and OS fingerprinting
+  dns     Enumerate Domain Controllers and Global Catalogs via SRV DNS records`,
 }
 
 var (
@@ -33,15 +38,25 @@ var (
 
 var infraScanCmd = &cobra.Command{
 	Use:   "scan",
-	Short: "Scan ports, identify services and detect OS",
-	Long: `Performs a professional-grade infrastructure scan:
-  - Multi-threaded TCP port scanning.
-  - Service banner grabbing and version identification.
-  - Heuristic OS fingerprinting.
+	Short: "TCP port scan with service detection and OS fingerprinting",
+	Long: `Multi-threaded TCP port scanner with service banner grabbing and heuristic OS detection.
 
-Example:
-  adreaper infra scan --target 192.168.3.10
-  adreaper infra scan -t 10.0.0.1 --ports all -A`,
+Default Ports (Top 20 for AD environments):
+  21 FTP, 22 SSH, 53 DNS, 80 HTTP, 88 Kerberos, 135 RPC, 139/445 SMB
+  389 LDAP, 443 HTTPS, 464 Kpasswd, 636 LDAPS, 1433 MSSQL
+  3268/3269 GC LDAP, 3389 RDP, 5985/5986 WinRM, 9389 AD Web Services
+
+Flags:
+  --ports 80,443,445    Scan specific ports
+  --ports all           Scan all 65535 TCP ports (slow!)
+  -A                    Aggressive: enables deep OS/service fingerprinting
+  -Pn                   Skip host discovery (Nmap style)
+  --save results.txt    Save the report to a text file
+
+Examples:
+  adreaper infra scan --dc-ip 10.10.10.1
+  adreaper infra scan --dc-ip 10.10.10.1 --ports all -A
+  adreaper infra scan --dc-ip 10.10.10.1 --ports 80,443,445 --save scan.txt`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if infraScanTarget == "" {
 			infraScanTarget = opts.DCIP
@@ -185,7 +200,18 @@ Example:
 
 var infraDnsCmd = &cobra.Command{
 	Use:   "dns",
-	Short: "Enumerate DCs and Global Catalogs via DNS",
+	Short: "Enumerate Domain Controllers and Global Catalogs via SRV DNS records",
+	Long: `Performs SRV record queries to enumerate the Active Directory infrastructure:
+  - _ldap._tcp.dc._msdcs.<domain>      : Domain Controllers
+  - _gc._tcp.<domain>                  : Global Catalogs (multi-domain forests)
+
+SRV records are the authoritative method Windows uses to locate DCs.
+Useful when --dc-ip is not known or to validate the DC topology.
+
+Requires: --domain (-d) flag
+
+Example:
+  adreaper infra dns -d corp.local`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		output.Section(fmt.Sprintf("DNS Recon: %s", opts.Domain))
 		client := recon.NewDNSClient(opts)

@@ -13,7 +13,19 @@ import (
 
 var whoamiCmd = &cobra.Command{
 	Use:   "whoami",
-	Short: "Display current user context and privileges",
+	Short: "Display the current user's AD context, group memberships, and privilege level",
+	Long: `Queries Active Directory for the authenticated user's object and enumerates:
+  - Distinguished Name (DN) in the directory tree
+  - All group memberships (direct and inherited)
+  - Privilege classification: High (Domain/Enterprise Admin) or Standard User
+
+Useful immediately after authentication to understand what you can enumerate
+and whether privilege escalation is needed before proceeding to attack modules.
+
+Required: valid credentials (-u and -p, or --hash for Pass-the-Hash)
+
+Example:
+  adreaper whoami -d corp.local --dc-ip 10.10.10.1 -u user -p pass`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := opts.Validate(); err != nil {
 			return err

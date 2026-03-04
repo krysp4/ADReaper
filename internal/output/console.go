@@ -27,19 +27,47 @@ type TreeEntry struct {
 	Children []*TreeEntry
 }
 
-// PrintBanner displays the tool's ASCII banner.
+// PrintBanner displays the tool's ASCII banner with a dramatic gradient effect.
 func PrintBanner() {
-	banner := `
- █████╗ ██████╗ ██████╗ ███████╗ █████╗ ██████╗ ███████╗██████╗ 
-██╔══██╗██╔══██╗██╔══██╗██╔════╝██╔══██╗██╔══██╗██╔════╝██╔══██╗
-███████║██║  ██║██████╔╝█████╗  ███████║██████╔╝█████╗  ██████╔╝
-██╔══██║██║  ██║██╔══██╗██╔══╝  ██╔══██║██╔═══╝ ██╔══╝  ██╔══██╗
-██║  ██║██████╔╝██║  ██║███████╗██║  ██║██║     ███████╗██║  ██║
-╚═╝  ╚═╝╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝     ╚══════╝╚═╝  ╚═╝
-                                              @adreaper v4.0.0
-`
-	fmt.Println(color.HiRedString(banner))
-	logToFile(banner)
+	// ASCII art lines — rendered individually for per-line color control
+	lines := []string{
+		` █████╗ ██████╗ ██████╗ ███████╗ █████╗ ██████╗ ███████╗██████╗ `,
+		`██╔══██╗██╔══██╗██╔══██╗██╔════╝██╔══██╗██╔══██╗██╔════╝██╔══██╗`,
+		`███████║██║  ██║██████╔╝█████╗  ███████║██████╔╝█████╗  ██████╔╝`,
+		`██╔══██║██║  ██║██╔══██╗██╔══╝  ██╔══██║██╔═══╝ ██╔══╝  ██╔══██╗`,
+		`██║  ██║██████╔╝██║  ██║███████╗██║  ██║██║     ███████╗██║  ██║`,
+		`╚═╝  ╚═╝╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝     ╚══════╝╚═╝  ╚═╝`,
+	}
+
+	// Gradient: white → yellow → red → dark-red per line
+	colorFns := []func(format string, a ...interface{}) string{
+		color.New(color.FgHiWhite, color.Bold).SprintfFunc(),
+		color.New(color.FgHiWhite, color.Bold).SprintfFunc(),
+		color.New(color.FgHiRed, color.Bold).SprintfFunc(),
+		color.New(color.FgHiRed, color.Bold).SprintfFunc(),
+		color.New(color.FgRed, color.Bold).SprintfFunc(),
+		color.New(color.FgRed).SprintfFunc(),
+	}
+
+	fmt.Println()
+	for i, line := range lines {
+		colored := colorFns[i]("%s", line)
+		fmt.Println(colored)
+		logToFile(line)
+	}
+
+	// ── Info bar ─────────────────────────────────────────────────────────────
+	versionStr := color.New(color.FgHiRed, color.Bold).Sprintf("v%s", Version)
+	tagline := color.New(color.FgHiBlack).Sprintf("Active Directory Red Team Toolkit")
+	separator := color.New(color.FgRed).Sprintf("│")
+
+	info := fmt.Sprintf(
+		"  %s  %s  %s",
+		versionStr, separator, tagline,
+	)
+	fmt.Println(info)
+	fmt.Println()
+	logToFile("ADReaper v" + Version)
 }
 
 // SetOutputFile initializes the global session log file.
