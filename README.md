@@ -1,6 +1,8 @@
 
 # ⚔️ ADReaper v4.0.0 — Tactical AD Exploitation Toolkit
+
 ![image](https://i.ibb.co/23Vnfx23/image.png)
+
 ADReaper is a professional-grade reconnaissance and exploitation tool designed for Red Teams and advanced penetration testers. It focuses on identifying complex misconfigurations and executing advanced Kerberos attacks.
 
 ## 🚀 One-Shot Quick Start
@@ -33,7 +35,7 @@ ADReaper uses **substring matching** for enumeration. In labs localized in other
 
 ---
 
-## 📖 Tactical Command Reference (Copy-Paste)
+## 📖 Tactical Command Reference
 
 ### 1. Advanced Reconnaissance
 | Objective | Command |
