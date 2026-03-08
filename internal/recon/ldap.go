@@ -12,6 +12,7 @@ import (
 	ldap "github.com/go-ldap/ldap/v3"
 
 	"adreaper/internal/config"
+	"adreaper/internal/output"
 )
 
 // ── UAC bit flags ─────────────────────────────────────────────────────────────
@@ -433,17 +434,33 @@ func (c *LDAPClient) QueryDomainInfo(ctx context.Context) (*DomainInfo, error) {
 	}
 	e := res.Entries[0]
 	return &DomainInfo{
-		Name:                c.opts.Domain,
-		DN:                  c.opts.BaseDN(),
-		FunctionalLevel:     entryInt(e, "msDS-Behavior-Version"),
+		Name:                getAttributeValue(e, "dnsHostName"),
+		DN:                  e.DN,
 		MachineAccountQuota: entryInt(e, "ms-DS-MachineAccountQuota"),
-		MinPasswordLength:   entryInt(e, "minPwdLength"),
-		LockoutThreshold:    entryInt(e, "lockoutThreshold"),
-		PasswordComplexity:  entryInt(e, "pwdProperties")&1 == 1,
 		MaxPasswordAge:      intervalToDuration(entryInt64(e, "maxPwdAge")),
+		MinPasswordLength:   entryInt(e, "minPwdLength"),
+		PasswordComplexity:  entryInt(e, "pwdProperties")&1 != 0,
+		LockoutThreshold:    entryInt(e, "lockoutThreshold"),
 		LockoutDuration:     intervalToDuration(entryInt64(e, "lockoutDuration")),
-		ObservationWindow:   intervalToDuration(entryInt64(e, "lockOutObservationWindow")),
+		FunctionalLevel:     entryInt(e, "msDS-Behavior-Version"),
 	}, nil
+}
+
+// QueryDomainSID retrieves the domain base SID in string format (e.g. S-1-5-21-...).
+func (c *LDAPClient) QueryDomainSID(ctx context.Context) (string, error) {
+	sr := ldap.NewSearchRequest(
+		c.opts.BaseDN(), ldap.ScopeBaseObject, ldap.NeverDerefAliases, 1, 0, false,
+		"(objectClass=*)", []string{"objectSid"}, nil,
+	)
+	res, err := c.conn.Search(sr)
+	if err != nil || len(res.Entries) == 0 {
+		return "", fmt.Errorf("domain SID query failed: %w", err)
+	}
+	rawSid := res.Entries[0].GetRawAttributeValue("objectSid")
+	if len(rawSid) == 0 {
+		return "", fmt.Errorf("objectSid empty on domain object")
+	}
+	return parseSID(rawSid), nil
 }
 
 // ── Trust Queries ─────────────────────────────────────────────────────────────
@@ -516,41 +533,110 @@ const (
 )
 
 var dcsyncGUIDs = map[string]string{
-	"1131f6ad9c0711d1f79f00c04fc2dcd2": "DS-Replication-Get-Changes",
-	"1131f6aa9c0711d1f79f00c04fc2dcd2": "DS-Replication-Get-Changes-All",
+	"1131f6ad9c0711d1f79f00c04fc2dcd2":     "DS-Replication-Get-Changes",
+	"1131f6aa9c0711d1f79f00c04fc2dcd2":     "DS-Replication-Get-Changes-All",
+	"1131F6AD-9C07-11D1-F79F-00C04FC2DCD2": "DS-Replication-Get-Changes",
+	"1131F6AA-9C07-11D1-F79F-00C04FC2DCD2": "DS-Replication-Get-Changes-All",
 }
 
-// QueryDangerousACLs checks ACLs on high-value AD objects for dangerous permissions.
+// QueryDangerousACLs checks ACLs across the domain for dangerous permissions.
 func (c *LDAPClient) QueryDangerousACLs(ctx context.Context) ([]ACLEntry, error) {
 	var results []ACLEntry
-	targets := make([]string, 0, len(hvtSuffixes)+1)
-	for _, sfx := range hvtSuffixes {
-		targets = append(targets, sfx+","+c.opts.BaseDN())
-	}
-	targets = append(targets, c.opts.BaseDN()) // domain root for DCSync
 
-	for _, dn := range targets {
-		sr := ldap.NewSearchRequest(
-			dn, ldap.ScopeBaseObject,
-			ldap.NeverDerefAliases, 1, 0, false,
-			"(objectClass=*)",
-			[]string{"nTSecurityDescriptor"},
-			nil, // SD_FLAGS control requires ber encoding; nTSecurityDescriptor returned for privileged binds
-		)
-		res, err := c.conn.Search(sr)
-		if err != nil {
-			continue
-		}
-		if len(res.Entries) == 0 {
-			continue
-		}
-		raw := res.Entries[0].GetRawAttributeValue("nTSecurityDescriptor")
-		if len(raw) > 0 {
-			entries := parseSecurityDescriptor(dn, raw)
-			results = append(results, entries...)
+	output.Info("Performing deep ACL audit (this may take a moment)...")
+
+	// 1. Get Domain SID for HVT resolution
+	domainSID, err := c.QueryDomainSID(ctx)
+	if err != nil {
+		output.Warn("Could not retrieve domain SID for ACL audit: %v", err)
+	}
+
+	// 2. Define High-Value Targets (HVTs)
+	hvtRIDs := []string{"-512", "-519", "-518"}
+	hvtSIDs := []string{
+		"S-1-5-32-544", // Administrators
+		"S-1-5-32-548", // Account Operators
+		"S-1-5-32-549", // Server Operators
+		"S-1-5-32-550", // Print Operators
+		"S-1-5-32-551", // Backup Operators
+	}
+	if domainSID != "" {
+		for _, rid := range hvtRIDs {
+			hvtSIDs = append(hvtSIDs, domainSID+rid)
 		}
 	}
+
+	// 3. Collect targets: Domain Root, AdminSDHolder, and all HVT objects
+	targets := []string{c.opts.BaseDN(), "CN=AdminSDHolder,CN=System," + c.opts.BaseDN()}
+
+	for _, sidStr := range hvtSIDs {
+		binSid := SIDToBinary(sidStr)
+		if binSid == nil {
+			continue
+		}
+		var filter strings.Builder
+		filter.WriteString("(objectSid=")
+		for _, b := range binSid {
+			filter.WriteString(fmt.Sprintf("\\%02x", b))
+		}
+		filter.WriteString(")")
+
+		sr := ldap.NewSearchRequest(c.opts.BaseDN(), ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 1, 0, false, filter.String(), []string{"distinguishedName"}, nil)
+		res, err := c.conn.Search(sr)
+		if err == nil && len(res.Entries) > 0 {
+			targets = append(targets, res.Entries[0].DN)
+		}
+	}
+
+	// 4. Audit each target
+	for _, dn := range targets {
+		results = append(results, c.auditObjectACLs(ctx, dn)...)
+	}
+
 	return results, nil
+}
+
+func (c *LDAPClient) auditObjectACLs(ctx context.Context, dn string) []ACLEntry {
+	var entries []ACLEntry
+	sr := ldap.NewSearchRequest(
+		dn, ldap.ScopeBaseObject, ldap.NeverDerefAliases, 0, 0, false,
+		"(objectClass=*)", []string{"nTSecurityDescriptor"}, nil,
+	)
+	res, err := c.conn.Search(sr)
+	if err != nil || len(res.Entries) == 0 {
+		return nil
+	}
+
+	raw := res.Entries[0].GetRawAttributeValue("nTSecurityDescriptor")
+	if len(raw) > 0 {
+		entries = parseSecurityDescriptor(dn, raw)
+	}
+	return entries
+}
+
+// SIDToBinary converts a SID string (e.g. S-1-5-21-...) to its binary representation.
+func SIDToBinary(sidStr string) []byte {
+	parts := strings.Split(sidStr, "-")
+	if len(parts) < 3 || parts[0] != "S" {
+		return nil
+	}
+	rev, _ := strconv.Atoi(parts[1])
+	auth, _ := strconv.ParseUint(parts[2], 10, 64)
+	subCount := len(parts) - 3
+
+	b := make([]byte, 8+subCount*4)
+	b[0] = byte(rev)
+	b[1] = byte(subCount)
+	// Authority is big-endian 48-bit
+	for i := 0; i < 6; i++ {
+		b[7-i] = byte(auth >> (8 * uint(i)))
+	}
+	// Sub-authorities are little-endian 32-bit
+	for i := 0; i < subCount; i++ {
+		val, _ := strconv.ParseUint(parts[3+i], 10, 32)
+		binary.LittleEndian.PutUint32(b[8+i*4:12+i*4], uint32(val))
+	}
+	return b
 }
 
 // ── ADCS Queries ──────────────────────────────────────────────────────────────
@@ -842,6 +928,9 @@ func parseSecurityDescriptor(objectDN string, raw []byte) []ACLEntry {
 }
 
 func isDangerousACE(mask uint32, guid string) bool {
+	// Normalize GUID for case-insensitive matching
+	guid = strings.ToLower(guid)
+
 	if mask&maskGenericAll != 0 || mask&maskWriteDACL != 0 ||
 		mask&maskWriteOwner != 0 || mask&maskGenericWrite != 0 {
 		return true

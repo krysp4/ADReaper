@@ -8,7 +8,7 @@ import (
 	"github.com/fatih/color"
 )
 
-const Version = "4.0.0"
+const Version = "4.4.7"
 
 var (
 	sessionLog  *os.File
@@ -58,7 +58,7 @@ func PrintBanner() {
 
 	// ── Info bar ─────────────────────────────────────────────────────────────
 	versionStr := color.New(color.FgHiRed, color.Bold).Sprintf("v%s", Version)
-	tagline := color.New(color.FgHiBlack).Sprintf("Active Directory Red Team Toolkit")
+	tagline := color.New(color.FgHiBlack).Sprintf("ADReaper v4.4.7 — Active Directory Red Team Toolkit")
 	separator := color.New(color.FgRed).Sprintf("│")
 
 	info := fmt.Sprintf(
@@ -91,6 +91,7 @@ func logToFile(format string, a ...interface{}) {
 	// Basic ANSI strip (regex could be better but this covers fatih/color)
 	msg = stripANSI(msg)
 	fmt.Fprintln(sessionLog, msg)
+	sessionLog.Sync() // Ensure real-time persistence
 }
 
 func stripANSI(str string) string {
@@ -192,6 +193,7 @@ func printNode(node *TreeEntry, indent string, isLast bool) {
 	}
 
 	fmt.Printf("%s%s%s\n", indent, marker, name)
+	logToFile("%s%s%s", indent, marker, stripANSI(name))
 
 	newIndent := indent
 	if isLast {
@@ -285,9 +287,11 @@ func PrintProgressBar(current, total int) {
 // Finding prints a formatted vulnerability finding.
 func Finding(severity, title, evidence string) {
 	fmt.Printf("[%s] %s\n", criticalCol(severity), color.HiWhiteString(title))
+	logToFile("[%s] %s", severity, title)
 	if evidence != "" {
 		for _, line := range strings.Split(evidence, "\n") {
 			fmt.Printf("    %s %s\n", infoCol(">"), line)
+			logToFile("    > %s", line)
 		}
 	}
 }

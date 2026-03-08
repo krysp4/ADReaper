@@ -15,7 +15,7 @@ var opts = config.DefaultOptions()
 
 var rootCmd = &cobra.Command{
 	Use:   "adreaper",
-	Short: "ADReaper v4.0.0 — Active Directory Red Team Toolkit",
+	Short: "ADReaper v4.4.6 — Active Directory Red Team Toolkit",
 	Long: `ADReaper is a professional-grade Active Directory reconnaissance and exploitation toolkit
 designed for Red Teams and senior penetration testers.
 

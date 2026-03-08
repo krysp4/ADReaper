@@ -296,9 +296,6 @@ Examples:
 			}
 
 			desc := g.Description
-			if len(desc) > 60 {
-				desc = desc[:57] + "..."
-			}
 
 			rows = append(rows, []string{g.SAMAccountName, fmt.Sprintf("%d", len(g.Members)), admin, desc})
 		}
@@ -410,6 +407,10 @@ Example:
 		output.PrintTable([]string{"Object", "Principal", "Right", "Type"}, rows)
 		return nil
 	},
+}
+
+func init() {
+	enumACLsCmd.Flags().StringVarP(&aclTarget, "target", "t", "", "Target object to audit (DN or SAM)")
 }
 
 // ── enum trusts ──────────────────────────────────────────────────────────────
@@ -659,15 +660,9 @@ Examples:
 		}
 		defer smbCl.Close()
 
-		// Global Root for the tree (Hostname/IP)
-		globalRoot := &output.TreeEntry{
-			Name:  opts.DCIP,
-			IsDir: true,
-		}
-
 		if enumTreeShare == "" {
-			output.Section("SMB Global Tree View")
-			output.Info("Querying all accessible shares...")
+			output.Section("SMB Global Tree View (Auto-Crawl)")
+			output.Info("Crawling all accessible shares with depth %d...", enumTreeDepth)
 			shares, err := smbCl.ListShares()
 			if err != nil {
 				return err
@@ -677,13 +672,16 @@ Examples:
 				if sh.Access == "DENIED" || sh.Name == "IPC$" {
 					continue
 				}
-				globalRoot.Children = append(globalRoot.Children, &output.TreeEntry{
-					Name:  sh.Name,
-					IsDir: true,
-				})
+				output.Info("Walking share: %s...", sh.Name)
+				tree, _ := smbCl.WalkTree(sh.Name, ".", enumTreeDepth)
+				if tree != nil {
+					count := countTreeItems(tree)
+					output.Info("  [+] Discovered %d items in %s", count, sh.Name)
+					output.PrintTree(tree)
+				}
 			}
-			output.PrintTree(globalRoot)
-			output.Info("Use --share <name> to explore specific contents, or --share all for exhaustive recon.")
+			fmt.Println()
+			output.Info("Use --share <name> to explore specific contents with more depth.")
 			return nil
 		}
 
@@ -706,11 +704,12 @@ Examples:
 				output.Info("Walking share: %s...", sh.Name)
 				tree, _ := smbCl.WalkTree(sh.Name, ".", enumTreeDepth)
 				if tree != nil {
-					globalRoot.Children = append(globalRoot.Children, tree)
+					count := countTreeItems(tree)
+					output.Info("  [+] Discovered %d items in %s", count, sh.Name)
+					output.PrintTree(tree)
 				}
 			}
 			fmt.Println()
-			output.PrintTree(globalRoot)
 			return nil
 		}
 
@@ -940,4 +939,15 @@ Examples:
 		output.Info("Use specific 'enum <category>' commands for deeper attribute analysis.")
 		return nil
 	},
+}
+
+func countTreeItems(node *output.TreeEntry) int {
+	if node == nil {
+		return 0
+	}
+	count := 1 // current node
+	for _, child := range node.Children {
+		count += countTreeItems(child)
+	}
+	return count
 }

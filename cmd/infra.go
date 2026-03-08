@@ -177,9 +177,6 @@ Examples:
 		var rows [][]string
 		for _, p := range res.Ports {
 			banner := res.Banners[p.Port]
-			if len(banner) > 30 {
-				banner = banner[:27] + "..."
-			}
 			rows = append(rows, []string{
 				strconv.Itoa(p.Port),
 				p.State,
