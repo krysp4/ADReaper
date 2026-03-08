@@ -1,3 +1,5 @@
+![ADReaper Header](https://i.ibb.co/231PQS2L/image.png)
+
 # ADReaper v4.4.7 — Active Directory Red Team Toolkit
 
 ![Go Version](https://img.shields.io/badge/Go-1.22+-00ADD8?style=for-the-badge&logo=go)
@@ -95,6 +97,25 @@ ADReaper provides a rich, colored terminal interface with real-time feedback and
     └── Archive/
         └── old_passwords.txt
 ```
+
+---
+
+## 📸 Proof of Concept
+
+### SMB Tree Enumeration
+`.\adreaper.exe enum tree --share BankDataTemporal --depth 5 -d santander.local -u Administrador -p Admin2026! --dc-ip 192.168.3.2`
+
+![SMB Tree](https://i.ibb.co/LdKrqN0K/enum-Tree-Bank.png)
+
+### User Enumeration
+`adreaper enum users -d santander.local --dc-ip 192.168.3.2 -u Administrador -p Admin2026!`
+
+![Enum Users](https://i.ibb.co/tPb2VVXh/image.png)
+
+### Kerberoasting
+`adreaper attack kerberoast -d santander.local --dc-ip 192.168.3.2 -u Administrador -p Admin2026!`
+
+![Kerberoast](https://i.ibb.co/S4GsQ95y/image.png)
 
 ---
 
@@ -411,3 +432,8 @@ ADReaper is designed to work alongside:
 For authorized penetration testing and red team operations only.
 © 2026 — ADReaper Project
 
+---
+
+## 🤝 Connect & Community
+- **Telegram Group**: [MimikatzES](https://t.me/MimikatzES)
+- **LinkedIn**: [Krysp4](https://www.linkedin.com/in/krysp4/)
